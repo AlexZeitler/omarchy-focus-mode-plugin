@@ -9,24 +9,43 @@ import qs.Commons
 // Focus mode: dims everything behind the focused window, turns the wallpaper
 // gray and hides the bar. Toggled over IPC:
 //   omarchy-shell focus-mode toggle
-// The plugin binds a key for this itself, see "Key binding" below.
+// The plugin binds a key for this itself, see "Key binding" below. The bar
+// widget in Panel.qml sets how strong the dimming and the gray are, and shows
+// a preview while its sliders move.
 Item {
   id: root
 
   property var shell: null
 
-  readonly property real dimStrength: 0.7
   readonly property int fadeMs: 250
   readonly property string home: Quickshell.env("HOME")
   readonly property string backgroundLink: home + "/.local/state/omarchy/current/background"
   readonly property string barOffFlag: home + "/.local/state/omarchy/toggles/bar-off"
+  readonly property string pluginId: "alexzeitler.focus-mode"
 
+  readonly property real defaultDim: 0.7
+  readonly property real defaultGrayscale: 1
+
+  // Focus mode as toggled by key or IPC.
   property bool active: false
+  // The bar widget shows the effect while its sliders move. The bar stays.
+  property bool previewing: false
+  property real previewDim: defaultDim
+  property real previewGrayscale: defaultGrayscale
+
+  // Settings from shell.json.
+  property real configuredDim: defaultDim
+  property real configuredGrayscale: defaultGrayscale
+
+  readonly property bool shown: active || previewing
+  readonly property real dimTarget: previewing ? previewDim : configuredDim
+  readonly property real grayscaleTarget: previewing ? previewGrayscale : configuredGrayscale
+
   // dim_around strength before focus mode changed it, restored on leaving.
   property real originalDimAround: 0.4
-  property bool barWasHidden: false
   // Set while dim_around and its strength still need restoring.
   property bool restorePending: false
+  property bool barWasHidden: false
   property string wallpaper: ""
   readonly property bool wallpaperIsStill: /\.(jpe?g|png|webp)$/i.test(wallpaper)
 
@@ -86,16 +105,12 @@ Item {
   function enable() {
     if (active) return
     active = true
-    startProc.running = true
+    barHideProc.running = true
   }
 
   function disable() {
     if (!active) return
     active = false
-    grayLevel = 0
-    // Once faded out, the windows lose dim_around and the strength returns to
-    // what it was.
-    fadeStrength(0, "", dimLua(false) + strengthLua(originalDimAround))
     if (!barWasHidden) Quickshell.execDetached(["omarchy-toggle-bar", "off"])
   }
 
@@ -104,44 +119,90 @@ Item {
     else enable()
   }
 
-  // The fade-out has ended, the next start reads the strength afresh. A
-  // toggle back on during the fade-out keeps the strength read before.
+  // Called by the bar widget. Values outside 0..1 are clamped.
+  function setPreview(dim, grayscale) {
+    previewDim = clamp01(dim, defaultDim)
+    previewGrayscale = clamp01(grayscale, defaultGrayscale)
+    previewing = true
+  }
+
+  function endPreview() {
+    previewing = false
+  }
+
+  function clamp01(value, fallback) {
+    var n = Number(value)
+    if (isNaN(n)) return fallback
+    return Math.max(0, Math.min(1, n))
+  }
+
+  onShownChanged: {
+    if (shown) {
+      startProc.running = true
+      return
+    }
+    grayLevel = 0
+    // Once faded out, the windows lose dim_around and the strength returns to
+    // what it was.
+    fadeStrength(0, "", dimLua(false) + strengthLua(originalDimAround))
+  }
+
+  // A slider sends a stream of values. Only the last one of a burst reaches
+  // Hyprland, so an older dispatch cannot overtake it.
+  onDimTargetChanged: if (shown && restorePending) dimTimer.restart()
+
+  Timer {
+    id: dimTimer
+    interval: 40
+    onTriggered: if (root.shown && root.restorePending) root.fadeStrength(root.dimTarget, "", "")
+  }
+
+  // The fade-out has ended, the next start reads the strength afresh. A start
+  // during the fade-out keeps the strength read before.
   onGrayLevelChanged: {
-    if (!active && grayLevel === 0) restorePending = false
+    if (!shown && grayLevel === 0) restorePending = false
   }
 
   Connections {
     target: Hyprland
-    enabled: root.active
+    enabled: root.shown
     function onActiveToplevelChanged() { root.luaRun(root.dimLua(true)) }
   }
 
   // Reads the state focus mode needs before it changes anything: the current
-  // dim_around strength, whether the bar is already hidden and the wallpaper.
+  // dim_around strength and the wallpaper.
   Process {
     id: startProc
     command: ["bash", "-c",
-      'hyprctl getoption decoration:dim_around -j | jq -r ".float"; ' +
-      '[[ -f "$1" ]] && echo hidden || echo shown; ' +
-      'readlink -f "$2"',
-      "focus-mode", root.barOffFlag, root.backgroundLink]
+      'hyprctl getoption decoration:dim_around -j | jq -r ".float"; readlink -f "$1"',
+      "focus-mode", root.backgroundLink]
     stdout: StdioCollector {
       onStreamFinished: {
-        if (!root.active) return
+        if (!root.shown) return
         var lines = String(text || "").split("\n")
         var strength = parseFloat(lines[0])
         // A fade-out still running has lowered the strength already.
         var wasPending = root.restorePending
         if (!wasPending && !isNaN(strength)) root.originalDimAround = strength
         root.restorePending = true
-        root.barWasHidden = lines[1] === "hidden"
-        root.wallpaper = String(lines[2] || "").trim()
-        if (!root.barWasHidden) Quickshell.execDetached(["omarchy-toggle-bar", "on"])
+        root.wallpaper = String(lines[1] || "").trim()
         // Starting from scratch, the fade begins at 0 rather than at the
         // configured strength.
-        root.fadeStrength(root.dimStrength, (wasPending ? "" : root.strengthLua(0)) + root.dimLua(true), "")
+        root.fadeStrength(root.dimTarget, (wasPending ? "" : root.strengthLua(0)) + root.dimLua(true), "")
         root.grayLevel = 1
       }
+    }
+  }
+
+  // Hides the bar unless it is hidden already. A bar the user hid before
+  // stays hidden afterwards.
+  Process {
+    id: barHideProc
+    command: ["bash", "-c",
+      '[[ -f "$1" ]] && echo hidden || { omarchy-toggle-bar on >/dev/null 2>&1; echo shown; }',
+      "focus-mode", root.barOffFlag]
+    stdout: StdioCollector {
+      onStreamFinished: root.barWasHidden = String(text || "").trim() === "hidden"
     }
   }
 
@@ -152,56 +213,82 @@ Item {
     function on(): void { root.enable() }
     function off(): void { root.disable() }
     function status(): string { return root.active ? "on" : "off" }
+    function preview(dim: string, grayscale: string): void { root.setPreview(dim, grayscale) }
+    function endPreview(): void { root.endPreview() }
+  }
+
+  // ------------------------------------------------------------ Settings
+  //
+  // The settings sit on this plugin's entries in ~/.config/omarchy/shell.json:
+  // the entry in `plugins`, and the entry in the bar layout once the bar
+  // widget is placed. The bar entry wins where both carry a key.
+  //   key        "SUPER + D" by default; "" or false binds nothing
+  //   dim        0..1, 0.7 by default
+  //   grayscale  0..1, 1 by default; true and false mean 1 and 0
+  // Third-party plugins do not get the shell's config handed in, so the
+  // plugin reads the file itself.
+
+  readonly property string shellConfigPath: home + "/.config/omarchy/shell.json"
+
+  FileView {
+    id: shellConfigFile
+    path: root.shellConfigPath
+    watchChanges: true
+    onFileChanged: reload()
+    onLoaded: root.readConfig()
+    onLoadFailed: root.readConfig()
+  }
+
+  function pluginSettings(parsed) {
+    var merged = {}
+    var entries = parsed && Array.isArray(parsed.plugins) ? parsed.plugins : []
+    for (var i = 0; i < entries.length; i++)
+      if (entries[i] && String(entries[i].id || "") === pluginId)
+        for (var k in entries[i]) merged[k] = entries[i][k]
+    var layout = parsed && parsed.bar && parsed.bar.layout ? parsed.bar.layout : {}
+    for (var section in layout) {
+      var items = Array.isArray(layout[section]) ? layout[section] : []
+      for (var j = 0; j < items.length; j++)
+        if (items[j] && String(items[j].id || "") === pluginId)
+          for (var b in items[j]) merged[b] = items[j][b]
+    }
+    return merged
+  }
+
+  function readConfig() {
+    var settings
+    try {
+      settings = pluginSettings(JSON.parse(String(shellConfigFile.text() || "{}")))
+    } catch (e) {
+      // A half-written file keeps the settings read before.
+      return
+    }
+    configuredDim = clamp01(settings.dim, defaultDim)
+    configuredGrayscale = settings.grayscale === true ? 1
+      : settings.grayscale === false ? 0
+      : clamp01(settings.grayscale, defaultGrayscale)
+
+    var key = defaultKey
+    if ("key" in settings) key = settings.key === false ? "" : String(settings.key || "")
+    if (key === configuredKey && (boundKey === key || key === "")) return
+    configuredKey = key
+    updateBinding()
   }
 
   // ------------------------------------------------------------ Key binding
   //
   // The manifest has no field for key bindings, so the plugin binds its key in
-  // Hyprland at runtime. The key comes from this plugin's entry in
-  // ~/.config/omarchy/shell.json, `"key": "SUPER + D"` by default; an empty
-  // string or false binds nothing. A key that already has a binding is left
-  // alone, so a binding of the user's own always wins. Runtime bindings are
-  // gone after a Hyprland reload, so the plugin binds again after each one.
+  // Hyprland at runtime. A key that already has a binding is left alone, so a
+  // binding of the user's own always wins. Runtime bindings are gone after a
+  // Hyprland reload, so the plugin binds again after each one.
 
   readonly property string defaultKey: "SUPER + D"
-  readonly property string shellConfigPath: home + "/.config/omarchy/shell.json"
-  readonly property string pluginId: "alexzeitler.focus-mode"
   readonly property var modifierBits: ({ SHIFT: 1, CAPS: 2, CTRL: 4, CONTROL: 4, ALT: 8, MOD2: 16, MOD3: 32, SUPER: 64, WIN: 64, LOGO: 64, MOD4: 64, MOD5: 128 })
 
   // The key as configured, "" when the plugin should bind nothing.
   property string configuredKey: defaultKey
   // The key this plugin has bound, "" when none.
   property string boundKey: ""
-
-  // Third-party plugins do not get the shell's config handed in, so the
-  // plugin reads its own entry from disk.
-  FileView {
-    id: shellConfigFile
-    path: root.shellConfigPath
-    watchChanges: true
-    onFileChanged: reload()
-    onLoaded: root.readConfiguredKey()
-    onLoadFailed: root.readConfiguredKey()
-  }
-
-  function readConfiguredKey() {
-    var key = defaultKey
-    try {
-      var parsed = JSON.parse(String(shellConfigFile.text() || "{}"))
-      var entries = parsed && Array.isArray(parsed.plugins) ? parsed.plugins : []
-      for (var i = 0; i < entries.length; i++) {
-        var entry = entries[i]
-        if (!entry || String(entry.id || "") !== pluginId || !("key" in entry)) continue
-        key = entry.key === false ? "" : String(entry.key || "")
-      }
-    } catch (e) {
-      // A half-written file keeps the key read before.
-      return
-    }
-    if (key === configuredKey && (boundKey === key || key === "")) return
-    configuredKey = key
-    updateBinding()
-  }
 
   // Only plain key names reach the Lua string, nothing that could end it.
   function isSafeKey(key) {
@@ -266,7 +353,7 @@ Item {
       // The reload dropped the runtime binding and reset dim_around.
       root.boundKey = ""
       root.updateBinding()
-      if (root.active) root.fadeStrength(root.dimStrength, root.dimLua(true), "")
+      if (root.shown) root.fadeStrength(root.dimTarget, root.dimLua(true), "")
     }
   }
 
@@ -314,7 +401,7 @@ Item {
       MultiEffect {
         anchors.fill: parent
         source: wallpaperImage
-        saturation: -1.0
+        saturation: -root.grayscaleTarget
         opacity: root.grayLevel
       }
     }

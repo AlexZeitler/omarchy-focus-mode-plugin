@@ -7,9 +7,22 @@
   "license": "MIT",
   "description": "Dims everything behind the focused window, turns the wallpaper gray and hides the bar.",
   "kinds": [
-    "service"
+    "service",
+    "bar-widget"
   ],
   "entryPoints": {
-    "service": "Service.qml"
+    "service": "Service.qml",
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Focus Mode",
+    "description": "Sets how strongly focus mode dims and how gray the wallpaper turns, with a live preview.",
+    "category": "Appearance",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "dim": 0.7,
+      "grayscale": 1
+    }
   }
 }

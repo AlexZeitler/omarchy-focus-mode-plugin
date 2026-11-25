@@ -9,8 +9,12 @@ all back.
 ## Glossary
 
 Service plugin
-: A plugin without a bar icon. It runs inside the Omarchy shell, the one
-  Quickshell process that also draws the bar and the notifications.
+: The part of the plugin that runs focus mode. It lives inside the Omarchy
+  shell, the one Quickshell process that also draws the bar and the
+  notifications.
+
+Bar widget
+: The icon the plugin places in the bar. It opens a panel with the settings.
 
 dim_around
 : A Hyprland window property. The window it is set on stays as it is,
@@ -24,6 +28,8 @@ dim_around
 - Hides the bar, and shows it again afterwards. A bar that was hidden before
   stays hidden.
 - Fades in and out. With `omarchy toggle animations` off, it switches at once.
+- Lets you set how strongly it dims and how gray the wallpaper turns, with a
+  live preview.
 
 ## Install
 
@@ -62,6 +68,35 @@ If you would rather keep the binding in your Hyprland config, set
 ```lua
 o.bind("SUPER + D", "Toggle focus mode", "omarchy-shell focus-mode toggle")
 ```
+
+## Settings
+
+Click the eye icon in the bar. The panel has two sliders:
+
+Dim
+: How dark everything behind the focused window gets, from 0% to 100%.
+  70% by default.
+
+Grayscale
+: How much color the wallpaper loses, from 0% to 100%. 100% by default.
+
+While the panel is open, the screen shows focus mode with the slider values.
+The bar stays visible. Releasing a slider saves the value, closing the panel
+ends the preview.
+
+The values sit on the widget's entry in the bar layout of
+`~/.config/omarchy/shell.json`, as numbers between 0 and 1:
+
+```json
+{
+  "id": "alexzeitler.focus-mode",
+  "dim": 0.7,
+  "grayscale": 1
+}
+```
+
+They also work without the bar widget, on the plugin's entry in `plugins`.
+Changes to the file apply on save, even while focus mode is on.
 
 ## Works best with a single square window
 
