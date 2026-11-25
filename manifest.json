@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "alexzeitler.focus-mode",
+  "name": "Focus Mode",
+  "version": "0.1.0",
+  "author": "Alexander Zeitler",
+  "license": "MIT",
+  "description": "Dims everything behind the focused window, turns the wallpaper gray and hides the bar.",
+  "kinds": [
+    "service"
+  ],
+  "entryPoints": {
+    "service": "Service.qml"
+  }
+}
