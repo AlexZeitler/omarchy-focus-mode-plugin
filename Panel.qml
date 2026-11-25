@@ -22,6 +22,16 @@ Panel {
   readonly property real dim: root.service ? root.service.configuredDim : clamp01(root.setting("dim", defaultDim), defaultDim)
   readonly property real grayscale: root.service ? root.service.configuredGrayscale : clamp01(root.setting("grayscale", defaultGrayscale), defaultGrayscale)
 
+  // What the sliders show. PanelSlider resets its knob to `value` on release,
+  // while the saved setting only comes back once the shell has written
+  // shell.json and the service has read it again. Bound to the setting
+  // directly, the knob jumped back to the old value and then to the new one.
+  // These follow every move at once, and the saved setting once it arrives.
+  property real dimValue: dim
+  property real grayscaleValue: grayscale
+  onDimChanged: dimValue = dim
+  onGrayscaleChanged: grayscaleValue = grayscale
+
   // As an escape rather than the glyph itself: a literal private-use character
   // does not survive every editor and pipe it passes through.
   readonly property string barIcon: ""
@@ -43,8 +53,8 @@ Panel {
   }
 
   function preview() {
-    var d = dimSlider.liveValue
-    var g = graySlider.liveValue
+    var d = root.dimValue
+    var g = root.grayscaleValue
     if (root.service) root.service.setPreview(d, g)
     else Quickshell.execDetached(["omarchy-shell", "focus-mode", "preview", String(d), String(g)])
   }
@@ -59,8 +69,10 @@ Panel {
   function persist() {
     var next = {}
     for (var k in root.settings) if (k !== "id") next[k] = root.settings[k]
-    next.dim = Math.round(dimSlider.liveValue * 100) / 100
-    next.grayscale = Math.round(graySlider.liveValue * 100) / 100
+    next.dim = Math.round(root.dimValue * 100) / 100
+    next.grayscale = Math.round(root.grayscaleValue * 100) / 100
+    root.dimValue = next.dim
+    root.grayscaleValue = next.grayscale
     root.settings = next
     if (root.bar && root.bar.shell && typeof root.bar.shell.updateEntryInline === "function")
       root.bar.shell.updateEntryInline(root.moduleName, next)
@@ -144,8 +156,8 @@ Panel {
           minimum: 0
           maximum: 1
           step: 0.05
-          value: root.dim
-          onMoved: function(v) { root.preview() }
+          value: root.dimValue
+          onMoved: function(v) { root.dimValue = v; root.preview() }
           onReleased: function(v) { root.persist() }
         }
 
@@ -175,8 +187,8 @@ Panel {
           minimum: 0
           maximum: 1
           step: 0.05
-          value: root.grayscale
-          onMoved: function(v) { root.preview() }
+          value: root.grayscaleValue
+          onMoved: function(v) { root.grayscaleValue = v; root.preview() }
           onReleased: function(v) { root.persist() }
         }
       }
