@@ -1,4 +1,4 @@
-# omarchy-focus-mode-plugin
+# Omarchy Focus Mode Plugin
 
 A focus mode for Omarchy. One key press dims everything behind the focused
 window, turns the wallpaper gray and hides the bar. The next press brings it
