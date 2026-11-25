@@ -24,7 +24,8 @@ dim_around
 
 - Darkens everything behind the focused window, other windows and the
   wallpaper alike. The darkening follows the focus to the next window.
-- Shows the wallpaper in gray while focus mode is on.
+- Shows the wallpaper and the border of the focused window in gray while
+  focus mode is on.
 - Hides the bar, and shows it again afterwards. A bar that was hidden before
   stays hidden.
 - Fades in and out. With `omarchy toggle animations` off, it switches at once.
@@ -71,7 +72,7 @@ o.bind("SUPER + D", "Toggle focus mode", "omarchy-shell focus-mode toggle")
 
 ## Settings
 
-Click the eye icon in the bar. The panel has two sliders:
+Click the eye icon in the bar. The panel has two sliders and a switch:
 
 ![The settings panel previewing dim and grayscale while the sliders move](assets/settings.gif)
 
@@ -80,20 +81,27 @@ Dim
   70% by default.
 
 Grayscale
-: How much color the wallpaper loses, from 0% to 100%. 100% by default.
+: How much color the wallpaper and the border of the focused window lose,
+  from 0% to 100%. 100% by default.
+
+Gray border
+: Whether the border of the focused window follows Grayscale. On by default.
+  Switched off, the border keeps the theme's colors.
 
 While the panel is open, the screen shows focus mode with the slider values.
 The bar stays visible. Releasing a slider saves the value, closing the panel
 ends the preview.
 
 The values sit on the widget's entry in the bar layout of
-`~/.config/omarchy/shell.json`, as numbers between 0 and 1:
+`~/.config/omarchy/shell.json`. `dim` and `grayscale` are numbers between 0
+and 1:
 
 ```json
 {
   "id": "alexzeitler.focus-mode",
   "dim": 0.7,
-  "grayscale": 1
+  "grayscale": 1,
+  "grayscaleBorder": true
 }
 ```
 

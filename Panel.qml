@@ -14,6 +14,7 @@ Panel {
 
   readonly property real defaultDim: 0.7
   readonly property real defaultGrayscale: 1
+  readonly property bool defaultGrayscaleBorder: true
 
   // The service of this plugin. Without it, the panel falls back to IPC.
   readonly property var service: root.bar && root.bar.shell && typeof root.bar.shell.serviceFor === "function"
@@ -21,6 +22,7 @@ Panel {
 
   readonly property real dim: root.service ? root.service.configuredDim : clamp01(root.setting("dim", defaultDim), defaultDim)
   readonly property real grayscale: root.service ? root.service.configuredGrayscale : clamp01(root.setting("grayscale", defaultGrayscale), defaultGrayscale)
+  readonly property bool grayscaleBorder: root.service ? root.service.configuredGrayscaleBorder : root.setting("grayscaleBorder", defaultGrayscaleBorder) !== false
 
   // What the sliders show. PanelSlider resets its knob to `value` on release,
   // while the saved setting only comes back once the shell has written
@@ -31,6 +33,8 @@ Panel {
   property real grayscaleValue: grayscale
   onDimChanged: dimValue = dim
   onGrayscaleChanged: grayscaleValue = grayscale
+  property bool grayscaleBorderValue: grayscaleBorder
+  onGrayscaleBorderChanged: grayscaleBorderValue = grayscaleBorder
 
   // As an escape rather than the glyph itself: a literal private-use character
   // does not survive every editor and pipe it passes through.
@@ -55,8 +59,9 @@ Panel {
   function preview() {
     var d = root.dimValue
     var g = root.grayscaleValue
-    if (root.service) root.service.setPreview(d, g)
-    else Quickshell.execDetached(["omarchy-shell", "focus-mode", "preview", String(d), String(g)])
+    var b = root.grayscaleBorderValue
+    if (root.service) root.service.setPreview(d, g, b)
+    else Quickshell.execDetached(["omarchy-shell", "focus-mode", "preview", String(d), String(g), String(b)])
   }
 
   function endPreview() {
@@ -73,6 +78,7 @@ Panel {
     next.grayscale = Math.round(root.grayscaleValue * 100) / 100
     root.dimValue = next.dim
     root.grayscaleValue = next.grayscale
+    next.grayscaleBorder = root.grayscaleBorderValue
     root.settings = next
     if (root.bar && root.bar.shell && typeof root.bar.shell.updateEntryInline === "function")
       root.bar.shell.updateEntryInline(root.moduleName, next)
@@ -190,6 +196,22 @@ Panel {
           value: root.grayscaleValue
           onMoved: function(v) { root.grayscaleValue = v; root.preview() }
           onReleased: function(v) { root.persist() }
+        }
+
+        // Toggle is stateless about its value: it reports the click, and the
+        // panel flips the setting.
+        Toggle {
+          Layout.fillWidth: true
+          label: "Gray border"
+          description: "The border of the focused window loses color too."
+          checked: root.grayscaleBorderValue
+          foreground: root.fg
+          fontFamily: root.fontFamily
+          onClicked: {
+            root.grayscaleBorderValue = !root.grayscaleBorderValue
+            root.preview()
+            root.persist()
+          }
         }
       }
     }

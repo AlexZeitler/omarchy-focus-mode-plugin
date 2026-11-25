@@ -11,7 +11,8 @@ import qs.Commons
 //   omarchy-shell focus-mode toggle
 // The plugin binds a key for this itself, see "Key binding" below. The bar
 // widget in Panel.qml sets how strong the dimming and the gray are, and shows
-// a preview while its sliders move.
+// a preview while its sliders move. The gray applies to the wallpaper and to
+// the border of the focused window alike.
 Item {
   id: root
 
@@ -25,6 +26,7 @@ Item {
 
   readonly property real defaultDim: 0.7
   readonly property real defaultGrayscale: 1
+  readonly property bool defaultGrayscaleBorder: true
 
   // Focus mode as toggled by key or IPC.
   property bool active: false
@@ -32,14 +34,18 @@ Item {
   property bool previewing: false
   property real previewDim: defaultDim
   property real previewGrayscale: defaultGrayscale
+  property bool previewGrayscaleBorder: defaultGrayscaleBorder
 
   // Settings from shell.json.
   property real configuredDim: defaultDim
   property real configuredGrayscale: defaultGrayscale
+  property bool configuredGrayscaleBorder: defaultGrayscaleBorder
 
   readonly property bool shown: active || previewing
   readonly property real dimTarget: previewing ? previewDim : configuredDim
   readonly property real grayscaleTarget: previewing ? previewGrayscale : configuredGrayscale
+  // The border follows the grayscale amount, unless it is switched off.
+  readonly property real borderTarget: (previewing ? previewGrayscaleBorder : configuredGrayscaleBorder) ? grayscaleTarget : 0
 
   // dim_around strength before focus mode changed it, restored on leaving.
   property real originalDimAround: 0.4
@@ -73,6 +79,33 @@ Item {
     if (on) body += 'local a = hl.get_active_window() ' +
       'if a then hl.dispatch(hl.dsp.window.set_prop({ prop = "dim_around", value = "1", window = a })) end '
     return body
+  }
+
+  // Desaturates the active border by `amount`, 0..1. The theme's colors are
+  // kept in a Lua global on first use, so every amount starts from them and
+  // leaving focus mode puts them back unchanged. get_config hands colors out
+  // as "0xAARRGGBB" and the angle in degrees; hl.config takes rgba() strings.
+  function borderLua(amount) {
+    return "local o = _G.__focus_mode_border " +
+      "if not o then o = hl.get_config('general.col.active_border') _G.__focus_mode_border = o end " +
+      "local g = " + amount.toFixed(3) + " " +
+      "local function hex2(n) return string.format('%02x', math.floor(n + 0.5)) end " +
+      "local cols = {} " +
+      "for i, c in ipairs(o.colors) do " +
+      "  local v = tonumber(string.sub(c, 3), 16) " +
+      "  local a = math.floor(v / 16777216) % 256 " +
+      "  local r = math.floor(v / 65536) % 256 " +
+      "  local gr = math.floor(v / 256) % 256 " +
+      "  local b = v % 256 " +
+      "  local l = 0.299 * r + 0.587 * gr + 0.114 * b " +
+      "  cols[i] = 'rgba(' .. hex2(r + (l - r) * g) .. hex2(gr + (l - gr) * g) .. hex2(b + (l - b) * g) .. hex2(a) .. ')' " +
+      "end " +
+      "hl.config({ general = { col = { active_border = { colors = cols, angle = o.angle } } } }) "
+  }
+
+  // Puts the theme's border back, if focus mode changed it.
+  function restoreBorderLua() {
+    return "if _G.__focus_mode_border then " + borderLua(0) + " _G.__focus_mode_border = nil end "
   }
 
   function strengthLua(value) {
@@ -120,9 +153,10 @@ Item {
   }
 
   // Called by the bar widget. Values outside 0..1 are clamped.
-  function setPreview(dim, grayscale) {
+  function setPreview(dim, grayscale, grayscaleBorder) {
     previewDim = clamp01(dim, defaultDim)
     previewGrayscale = clamp01(grayscale, defaultGrayscale)
+    previewGrayscaleBorder = grayscaleBorder !== false && grayscaleBorder !== "false"
     previewing = true
   }
 
@@ -143,13 +177,21 @@ Item {
     }
     grayLevel = 0
     // Once faded out, the windows lose dim_around and the strength returns to
-    // what it was.
-    fadeStrength(0, "", dimLua(false) + strengthLua(originalDimAround))
+    // what it was. The border gets its color back at once.
+    fadeStrength(0, restoreBorderLua(), dimLua(false) + strengthLua(originalDimAround))
   }
 
   // A slider sends a stream of values. Only the last one of a burst reaches
   // Hyprland, so an older dispatch cannot overtake it.
   onDimTargetChanged: if (shown && restorePending) dimTimer.restart()
+
+  onBorderTargetChanged: if (shown && restorePending) borderTimer.restart()
+
+  Timer {
+    id: borderTimer
+    interval: 40
+    onTriggered: if (root.shown && root.restorePending) root.luaRun(root.borderLua(root.borderTarget))
+  }
 
   Timer {
     id: dimTimer
@@ -188,7 +230,8 @@ Item {
         root.wallpaper = String(lines[1] || "").trim()
         // Starting from scratch, the fade begins at 0 rather than at the
         // configured strength.
-        root.fadeStrength(root.dimTarget, (wasPending ? "" : root.strengthLua(0)) + root.dimLua(true), "")
+        root.fadeStrength(root.dimTarget,
+          (wasPending ? "" : root.strengthLua(0)) + root.dimLua(true) + root.borderLua(root.borderTarget), "")
         root.grayLevel = 1
       }
     }
@@ -213,7 +256,7 @@ Item {
     function on(): void { root.enable() }
     function off(): void { root.disable() }
     function status(): string { return root.active ? "on" : "off" }
-    function preview(dim: string, grayscale: string): void { root.setPreview(dim, grayscale) }
+    function preview(dim: string, grayscale: string, grayscaleBorder: string): void { root.setPreview(dim, grayscale, grayscaleBorder) }
     function endPreview(): void { root.endPreview() }
   }
 
@@ -225,6 +268,7 @@ Item {
   //   key        "SUPER + D" by default; "" or false binds nothing
   //   dim        0..1, 0.7 by default
   //   grayscale  0..1, 1 by default; true and false mean 1 and 0
+  //   grayscaleBorder  true by default; false keeps the border's colors
   // Third-party plugins do not get the shell's config handed in, so the
   // plugin reads the file itself.
 
@@ -267,6 +311,7 @@ Item {
     configuredGrayscale = settings.grayscale === true ? 1
       : settings.grayscale === false ? 0
       : clamp01(settings.grayscale, defaultGrayscale)
+    configuredGrayscaleBorder = settings.grayscaleBorder !== false
 
     var key = defaultKey
     if ("key" in settings) key = settings.key === false ? "" : String(settings.key || "")
@@ -350,10 +395,12 @@ Item {
     target: Hyprland
     function onRawEvent(event) {
       if (event.name !== "configreloaded") return
-      // The reload dropped the runtime binding and reset dim_around.
+      // The reload dropped the runtime binding and reset dim_around and the
+      // border. The border is read afresh, a theme switch may have changed it.
       root.boundKey = ""
       root.updateBinding()
-      if (root.shown) root.fadeStrength(root.dimTarget, root.dimLua(true), "")
+      if (root.shown) root.fadeStrength(root.dimTarget,
+        "_G.__focus_mode_border = nil " + root.dimLua(true) + root.borderLua(root.borderTarget), "")
     }
   }
 
@@ -362,7 +409,7 @@ Item {
     if (boundKey) luaRun('hl.unbind("' + boundKey + '") ')
     if (!restorePending) return
     luaRun("_G.__focus_mode_fade = (_G.__focus_mode_fade or 0) + 1 " +
-      dimLua(false) + strengthLua(originalDimAround))
+      dimLua(false) + strengthLua(originalDimAround) + restoreBorderLua())
   }
 
   // The gray wallpaper sits on the bottom layer, above Omarchy's background
