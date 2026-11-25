@@ -73,6 +73,8 @@ o.bind("SUPER + D", "Toggle focus mode", "omarchy-shell focus-mode toggle")
 
 Click the eye icon in the bar. The panel has two sliders:
 
+![The settings panel previewing dim and grayscale while the sliders move](assets/settings.gif)
+
 Dim
 : How dark everything behind the focused window gets, from 0% to 100%.
   70% by default.
