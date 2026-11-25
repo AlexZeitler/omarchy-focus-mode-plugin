@@ -63,6 +63,12 @@ If you would rather keep the binding in your Hyprland config, set
 o.bind("SUPER + D", "Toggle focus mode", "omarchy-shell focus-mode toggle")
 ```
 
+## Works best with a single square window
+
+Focus mode works best together with Omarchy's single-window square aspect.
+Press `SUPER + CTRL + BACKSPACE` to toggle it. A lone window then no longer
+spans the whole screen, and the gray wallpaper shows on both sides of it.
+
 ## Control
 
 ```bash
